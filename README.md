@@ -42,5 +42,5 @@ To get the ripple effect, I use a simple sin wave pattern to displace the x-posi
 
 ###Screenshots
 
-[Screenshot 1](final_screen_0.png?raw=true)
-[Screenshot 2](final_screen_1.png?raw=true)
+![Screenshot 1](final_screen_0.png?raw=true)
+![Screenshot 2](final_screen_1.png?raw=true)
