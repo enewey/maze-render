@@ -27,8 +27,8 @@ protected:
 		sb7::application::init();
 
 		memcpy(info.title, title, sizeof(title));
-		info.windowWidth = 512;
-		info.windowHeight = 512;
+		info.windowWidth = 1920;
+		info.windowHeight = 1080;
 	}
 
 	//Functions
@@ -48,7 +48,7 @@ protected:
 
 	void generate_grass(int** level, int width, int height, std::vector< vmath::vec3 > & out_grass);
 	//Load .mdf (maze data file) into a 2D array of walls and floors (1 == wall, 0 == floor)
-	int ** load_level(std::string filename, int & width, int & height);
+	int ** load_level(std::string filename, int & width, int & height, int &startr, int &startc, int &endr, int &endc);
 	//Convert an array index into a vertex in the maze
 	float convert_to_vert(int coord, int dim);
 	int convert_to_coord(float pos, int dim);
@@ -58,6 +58,8 @@ protected:
 	//Programs
 	GLuint			walls_program;
 	GLuint			grass_program;
+	GLuint			floor_program;
+	GLuint			sprite_program;
 	
 	//Uniforms
 	struct uniforms_block
@@ -112,15 +114,17 @@ private:
 	float lookingAngle = 0.0f;
 	vmath::vec3 direction;
 	vmath::vec3 position;
-	float cXpos = 1.0f;
+	float cXpos;
 	float cYpos = 0.0f;
-	float cZpos = -3.0f;
+	float cZpos;
 
-	float lightY = 1.5f;
+	float endXpos, endZpos;
+
+	float lightY = 1.0f;
 
 	double timeElapsed = 0.0;
 
-	int _width, _height;
+	int _width, _height, _startr, _startc, _endr, _endc;
 	int ** _level;
 	
 	GLuint floor_buffer;
@@ -130,12 +134,15 @@ private:
 	GLuint grass_vao;
 	GLuint floor_vao;
 
+	//Texture buffers
 	GLuint wall_tex_buffer;
 	GLuint wall_normal_buffer;
 	GLuint floor_normal_buffer;
-	GLuint tex_toon;
 	GLuint grass_tex;
+	GLuint frame_tex;
+	GLuint trophy_tex;
 
+	//Vertex buffers
 	GLuint buffer;
 	GLuint normal_buffer;
 	GLuint tc_buffer;
@@ -153,8 +160,13 @@ private:
 	GLuint grass_buffer;
 	std::vector< vmath::vec3 > grass_points;
 
+	GLuint frame_buf;
+	GLuint render_buf;
+
 	//Each floor will have n^2 blades of grass
-	int grass_blades = 10;
+	int grass_blades = 6;
+
+	float trophy_scale = 0.5f;
 
 	sb7::object object;
 };
@@ -166,12 +178,14 @@ void maze_render_app::startup()
 		dirPress[i] = false;
 
 	direction = vmath::vec3(0.0f, 0.0f, -1.0f);
-	//position = vmath::vec3(0.0f, 3.0f, 0.0f);
 
+#pragma region Load shaders
 	// Create program for the spinning cube
 	//color_fragment_cube_program = glCreateProgram();
 	walls_program = glCreateProgram();
 	grass_program = glCreateProgram();
+	floor_program = glCreateProgram();
+	sprite_program = glCreateProgram();
 	GLint success = 0;
 
 	//Load per-fragment phong shaders
@@ -188,6 +202,15 @@ void maze_render_app::startup()
 	glGetProgramiv(walls_program, GL_LINK_STATUS, &success);
 	assert(success != GL_FALSE);
 
+	pvvs = sb7::shader::load("floor-vertex.glsl", GL_VERTEX_SHADER);
+	pvfs = sb7::shader::load("floor-fragment.glsl", GL_FRAGMENT_SHADER);
+	glAttachShader(floor_program, pvvs);
+	glAttachShader(floor_program, pvfs);
+	glLinkProgram(floor_program);
+	success = 0;
+	glGetProgramiv(floor_program, GL_LINK_STATUS, &success);
+	assert(success != GL_FALSE);
+
 	pvvs = sb7::shader::load("grass-vertex.glsl", GL_VERTEX_SHADER);
 	pvfs = sb7::shader::load("grass-fragment.glsl", GL_FRAGMENT_SHADER);
 	glAttachShader(grass_program, pvvs);
@@ -197,23 +220,67 @@ void maze_render_app::startup()
 	glGetProgramiv(grass_program, GL_LINK_STATUS, &success);
 	assert(success != GL_FALSE);
 
-	glUseProgram(walls_program);
-	//fragment_program = false;
+	pvvs = sb7::shader::load("sprite-vertex.glsl", GL_VERTEX_SHADER);
+	pvfs = sb7::shader::load("sprite-fragment.glsl", GL_FRAGMENT_SHADER);
+	glAttachShader(sprite_program, pvvs);
+	glAttachShader(sprite_program, pvfs);
+	glLinkProgram(sprite_program);
+	success = 0;
+	glGetProgramiv(sprite_program, GL_LINK_STATUS, &success);
+	assert(success != GL_FALSE);
+#pragma endregion
 
+#pragma region Create Framebuffer Object
+	glGenFramebuffers(1, &frame_buf);
+	glBindFramebuffer(GL_FRAMEBUFFER, frame_buf);
+
+	glGenTextures(1, &frame_tex);
+	glBindTexture(GL_TEXTURE_2D, frame_tex);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, 1920, 1080, 0, GL_RGB, GL_UNSIGNED_BYTE, NULL);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	glBindTexture(GL_TEXTURE_2D, 0);
+
+	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, frame_tex, 0);
+
+	glGenRenderbuffers(1, &render_buf);
+	glBindRenderbuffer(GL_RENDERBUFFER, render_buf);
+	glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, 1920, 1080);
+	glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, render_buf);
+
+	assert(glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE); //make sure FBO is created
+
+	glBindFramebuffer(GL_FRAMEBUFFER, 0);
+#pragma endregion
+
+#pragma region Load Textures
 	//Load textures
 	load_image("bin\\media\\textures\\wall.png", &wall_tex_buffer);
 	load_image("bin\\media\\textures\\normal.png", &wall_normal_buffer);
 	load_image("bin\\media\\textures\\floor_normal.png", &floor_normal_buffer);	
 	load_image("bin\\media\\textures\\grass_tex.png", &grass_tex);
+	load_image("bin\\media\\textures\\trophy.png", &trophy_tex);
+#pragma endregion
+
+#pragma region Load Object data
 	//Object data loaded from file
 	bool res = load_object("bin\\media\\objects\\wall_data.obj", vertices, uvs, normals);
 	assert(res);
 	res = load_object("bin\\media\\objects\\floor_data.obj", fvertices, fuvs, fnormals);
 	assert(res);
+#pragma endregion
 
-	_level = load_level("bin\\media\\objects\\walls.mdf", _width, _height);
+#pragma region Load and initialize level data
+	_level = load_level("bin\\media\\objects\\walls.mdf", _width, _height, _startr, _startc, _endr, _endc);
+
+	cXpos = convert_to_vert(_startc, _width) - 1.0f;
+	cZpos = convert_to_vert(_startr, _height) - 1.0f;
+
+	endXpos = convert_to_vert(_endc, _width) - 1.0f;
+	endZpos = convert_to_vert(_endr, _height) - 1.0f;
 
 	generate_grass(_level, _width, _height, grass_points);
+#pragma endregion
 	
 #pragma region Wall buffers
 
@@ -307,6 +374,8 @@ void maze_render_app::startup()
 	glDepthFunc(GL_LEQUAL);
 }
 
+
+
 void maze_render_app::render(double currentTime)
 {
 	static const GLfloat zeros[] = { 0.0f, 0.0f, 0.0f, 0.0f };
@@ -316,14 +385,9 @@ void maze_render_app::render(double currentTime)
 	static const GLfloat ones[] = { 1.0f };
 	const float f = (float)currentTime;
 	
-	glViewport(0, 0, info.windowWidth, info.windowHeight);
-	glClearBufferfv(GL_COLOR, 0, zeros);
-	glClearBufferfv(GL_DEPTH, 0, ones);
-
-
-#pragma region Camera positioning with key detection
 	vmath::vec3 view_position = vmath::vec3(cXpos, 0.0f, cZpos);
 	if (f - timeElapsed > 0.01) {
+#pragma region Camera positioning with key detection
 		timeElapsed = f;
 		if (dirPress[4]) {
 			lookingAngle += 2.0f;
@@ -363,6 +427,8 @@ void maze_render_app::render(double currentTime)
 #pragma endregion
 	}
 
+	vmath::vec3 light_pos = vmath::vec3(view_position[0], lightY, view_position[2]);
+
 	// Set up view and perspective matrix
 	vmath::mat4 view_matrix = vmath::lookat(view_position,
 		view_position + direction,
@@ -374,56 +440,27 @@ void maze_render_app::render(double currentTime)
 	uniforms_block* block;
 	vmath::mat4 model_matrix;
 
-	//Cube
-	glUseProgram(walls_program);
+	glBindFramebuffer(GL_FRAMEBUFFER, frame_buf);
 
-	GLint tex_brick_location = glGetUniformLocation(walls_program, "tex");
-	GLint bump_tex_location = glGetUniformLocation(walls_program, "bump_map");
+	glViewport(0, 0, 1920, 1080);
+	glClearColor(0.1f, 0.1f, 0.2f, 1.0f);
+	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+	glEnable(GL_DEPTH_TEST);
 
-	glUniform1i(tex_brick_location, 0);
-	glUniform1i(bump_tex_location, 1);
+	/*
+	//First, take a stencil of the floor being drawn
+	glEnable(GL_STENCIL_TEST);
+	glStencilFunc(GL_ALWAYS, 1, 0xFF);
+	glStencilOp(GL_KEEP, GL_KEEP, GL_REPLACE);
+	glStencilMask(0xFF);
+	glDepthMask(GL_FALSE);
+	glClear(GL_STENCIL_BUFFER_BIT);
 
-	glActiveTexture(GL_TEXTURE0 + 0); // Texture unit 0
-	glBindTexture(GL_TEXTURE_2D, wall_tex_buffer);
-	glActiveTexture(GL_TEXTURE0 + 1); // Texture unit 1	
-	glBindTexture(GL_TEXTURE_2D, wall_normal_buffer);
-	
-	glBindVertexArray(vao2);
-	glBindBuffer(GL_ARRAY_BUFFER, buffer);
-	glEnableVertexAttribArray(0);
-	glVertexAttribPointer(0, 4, GL_FLOAT, GL_FALSE, 0, 0);
-
-	glBindBuffer(GL_ARRAY_BUFFER, normal_buffer);
-	glEnableVertexAttribArray(1);
-	glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 0, 0);
-
-	glBindBuffer(GL_ARRAY_BUFFER, tc_buffer);
-	glEnableVertexAttribArray(2);
-	glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 0, 0);
-
-	//Draw room
-	GLint light_loc = glGetUniformLocation(walls_program, "light_pos");
-	glUniform4f(light_loc, cXpos, lightY, cZpos, 1.0f);
-	//glUniform4f(light_loc, 0.0f, 3.0f, 0.0f, 1.0f);
-
-	glBindBufferBase(GL_UNIFORM_BUFFER, 0, uniforms_buffer);
-	block = (uniforms_block *)glMapBufferRange(GL_UNIFORM_BUFFER, 0, sizeof(uniforms_block), GL_MAP_WRITE_BIT | GL_MAP_INVALIDATE_BUFFER_BIT);
-
-	model_matrix =
-		vmath::scale(1.0f);
-		
-	block->mv_matrix = view_matrix * model_matrix;
-	block->view_matrix = view_matrix;
-	block->proj_matrix = perspective_matrix;
-
-	//change_settings(1, 1, 0, 0);
-	glCullFace(GL_FRONT);
-	glDrawArrays(GL_TRIANGLES, 0, vertices.size());
-	glUnmapBuffer(GL_UNIFORM_BUFFER);
-	//End Walls
-	
 #pragma region Floor Rendering
 	//Begin Floor
+	
+	glUseProgram(floor_program);
+
 	glBindVertexArray(floor_vao);
 	glBindBuffer(GL_ARRAY_BUFFER, fbuffer);
 	glEnableVertexAttribArray(0);
@@ -438,6 +475,173 @@ void maze_render_app::render(double currentTime)
 	glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 0, 0);
 
 	glBindBufferBase(GL_UNIFORM_BUFFER, 0, uniforms_buffer);
+	block = (uniforms_block *)glMapBufferRange(GL_UNIFORM_BUFFER, 0, sizeof(uniforms_block), GL_MAP_WRITE_BIT | GL_MAP_INVALIDATE_BUFFER_BIT);
+
+	//model_matrix =
+	//	vmath::scale(1.0f);
+
+	block->mv_matrix = view_matrix;// *model_matrix;
+	block->view_matrix = view_matrix;
+	block->proj_matrix = perspective_matrix;
+
+	//change_settings(1, 1, 0, 0);
+	glCullFace(GL_FRONT);
+	glDepthMask(GL_FALSE);
+	glDrawArrays(GL_TRIANGLES, 0, fvertices.size());
+	glUnmapBuffer(GL_UNIFORM_BUFFER);
+	glDepthMask(GL_TRUE);
+#pragma endregion
+
+	//Now draw the "reflection" using the stencil we just filled previously
+	glStencilFunc(GL_EQUAL, 1, 0xFF);
+	glStencilMask(0x00);
+	glDepthMask(GL_TRUE);
+	*/
+
+#pragma region Wall Reflection Rendering
+	glUseProgram(walls_program);
+
+	glActiveTexture(GL_TEXTURE0 + 0); // Texture unit 0
+	glBindTexture(GL_TEXTURE_2D, wall_tex_buffer);
+	glActiveTexture(GL_TEXTURE0 + 1); // Texture unit 1	
+	glBindTexture(GL_TEXTURE_2D, wall_normal_buffer);
+
+	glBindVertexArray(vao2);
+	glBindBuffer(GL_ARRAY_BUFFER, buffer);
+	glEnableVertexAttribArray(0);
+	glVertexAttribPointer(0, 4, GL_FLOAT, GL_FALSE, 0, 0);
+
+	glBindBuffer(GL_ARRAY_BUFFER, normal_buffer);
+	glEnableVertexAttribArray(1);
+	glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 0, 0);
+
+	glBindBuffer(GL_ARRAY_BUFFER, tc_buffer);
+	glEnableVertexAttribArray(2);
+	glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 0, 0);
+
+	//Draw walls
+	glUniform4f(glGetUniformLocation(walls_program, "light_pos"), light_pos[0], light_pos[1], light_pos[2], 1.0f);
+	glUniform1f(glGetUniformLocation(walls_program, "reflecting"), -1.0f);
+	glUniform1f(glGetUniformLocation(walls_program, "time"), currentTime);
+
+	glBindBufferBase(GL_UNIFORM_BUFFER, 0, uniforms_buffer);
+	block = (uniforms_block *)glMapBufferRange(GL_UNIFORM_BUFFER, 0, sizeof(uniforms_block), GL_MAP_WRITE_BIT);
+
+	model_matrix =
+		vmath::translate(0.0f, -2.0f, 0.0f) *
+		vmath::scale(1.0f, -1.0f, 1.0f);
+
+	block->mv_matrix = view_matrix * model_matrix;
+	block->view_matrix = view_matrix;
+	block->proj_matrix = perspective_matrix;
+
+	//change_settings(1, 1, 0, 0);
+	glCullFace(GL_BACK);
+	glDrawArrays(GL_TRIANGLES, 0, vertices.size());
+	glUnmapBuffer(GL_UNIFORM_BUFFER);
+	//End Walls
+#pragma endregion
+
+#pragma region Grass Reflection rendering
+	glUseProgram(grass_program);
+
+	glUniform1i(glGetUniformLocation(grass_program, "grass"), 2);
+	glActiveTexture(GL_TEXTURE0 + 2); // Texture unit 2
+	glBindTexture(GL_TEXTURE_2D, grass_tex);
+
+	glUniform4f(glGetUniformLocation(grass_program, "light_pos"), light_pos[0], light_pos[1], light_pos[2], 1.0f);
+	glUniform1f(glGetUniformLocation(grass_program, "reflecting"), -1.0f);
+
+	glBindVertexArray(grass_vao);
+	glBindBuffer(GL_ARRAY_BUFFER, grass_buffer);
+	glEnableVertexAttribArray(0);
+	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, 0);
+	//glVertexAttribDivisor(0, 1);
+	glBindBufferBase(GL_UNIFORM_BUFFER, 0, uniforms_buffer);
+	block = (uniforms_block *)glMapBufferRange(GL_UNIFORM_BUFFER, 0, sizeof(uniforms_block), GL_MAP_WRITE_BIT);
+
+	model_matrix =
+		vmath::translate(0.0f, -0.2f, 0.0f) * 
+		vmath::scale(1.0f, -1.0f, 1.0f);
+
+	block->mv_matrix = view_matrix * model_matrix;
+	block->view_matrix = view_matrix;
+	block->proj_matrix = perspective_matrix;
+
+	glCullFace(GL_FRONT);
+	glEnable(GL_BLEND);
+	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+	glDrawArrays(GL_TRIANGLES, 0, grass_points.size());
+
+	glDisable(GL_BLEND);
+	glUnmapBuffer(GL_UNIFORM_BUFFER);
+#pragma endregion
+
+#pragma region Trophy sprite reflection
+	glUseProgram(sprite_program);
+
+	glUniform1i(glGetUniformLocation(sprite_program, "tex"), 4);
+	glActiveTexture(GL_TEXTURE0 + 4); // Texture unit 4
+	glBindTexture(GL_TEXTURE_2D, trophy_tex);
+
+	glUniform3f(glGetUniformLocation(sprite_program, "pos"), endXpos, 0.0f, endZpos);
+	glUniform1f(glGetUniformLocation(sprite_program, "scalar"), trophy_scale);
+	glUniform1f(glGetUniformLocation(sprite_program, "reflecting"), -1.0f);
+
+	glBindBufferBase(GL_UNIFORM_BUFFER, 0, uniforms_buffer);
+	block = (uniforms_block *)glMapBufferRange(GL_UNIFORM_BUFFER, 0, sizeof(uniforms_block), GL_MAP_WRITE_BIT);
+
+	model_matrix =
+		vmath::translate(0.0f, -2.0f, 0.0f);
+
+	block->mv_matrix = view_matrix * model_matrix;
+	block->view_matrix = view_matrix;
+	block->proj_matrix = perspective_matrix;
+
+	glCullFace(GL_FRONT);
+	glEnable(GL_BLEND);
+	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+	glDrawArrays(GL_TRIANGLES, 0, 6);
+	glDisable(GL_BLEND);
+	glUnmapBuffer(GL_UNIFORM_BUFFER);
+#pragma endregion
+
+
+	//Stop stenciling
+	//glDisable(GL_STENCIL_TEST);
+
+	glBindFramebuffer(GL_FRAMEBUFFER, 0);
+	glViewport(0, 0, info.windowWidth, info.windowHeight);
+	glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+	glEnable(GL_DEPTH_TEST);
+
+	//Draw everything normal now
+#pragma region Floor Rendering (water)
+	glUseProgram(floor_program);
+	
+	glUniform1i(glGetUniformLocation(floor_program, "floor_tex"), 3);
+	glActiveTexture(GL_TEXTURE0 + 3); // Texture unit
+	glBindTexture(GL_TEXTURE_2D, frame_tex);
+	
+	glBindVertexArray(floor_vao);
+	glBindBuffer(GL_ARRAY_BUFFER, fbuffer);
+	glEnableVertexAttribArray(0);
+	glVertexAttribPointer(0, 4, GL_FLOAT, GL_FALSE, 0, 0);
+
+	glBindBuffer(GL_ARRAY_BUFFER, fnormal_buffer);
+	glEnableVertexAttribArray(1);
+	glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 0, 0);
+
+	glBindBuffer(GL_ARRAY_BUFFER, ftc_buffer);
+	glEnableVertexAttribArray(2);
+	glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 0, 0);
+
+	glUniform2f(glGetUniformLocation(floor_program, "window_size"), (float)info.windowWidth, (float)info.windowHeight);
+	glUniform1f(glGetUniformLocation(floor_program, "curr_time"), currentTime);
+
+	glBindBufferBase(GL_UNIFORM_BUFFER, 0, uniforms_buffer);
 	block = (uniforms_block *)glMapBufferRange(GL_UNIFORM_BUFFER, 0, sizeof(uniforms_block), GL_MAP_WRITE_BIT);
 
 	//model_matrix =
@@ -449,8 +653,57 @@ void maze_render_app::render(double currentTime)
 
 	//change_settings(1, 1, 0, 0);
 	glCullFace(GL_FRONT);
+	//glEnable(GL_BLEND);
 	glDrawArrays(GL_TRIANGLES, 0, fvertices.size());
+	//glDisable(GL_BLEND);
 	glUnmapBuffer(GL_UNIFORM_BUFFER);
+	#pragma endregion
+
+#pragma region Wall Render
+	//Walls
+	glUseProgram(walls_program);
+
+	glUniform1i(glGetUniformLocation(walls_program, "tex"), 0);
+	glUniform1i(glGetUniformLocation(walls_program, "bump_map"), 1);
+
+	glActiveTexture(GL_TEXTURE0 + 0); // Texture unit 0
+	glBindTexture(GL_TEXTURE_2D, wall_tex_buffer);
+	glActiveTexture(GL_TEXTURE0 + 1); // Texture unit 1	
+	glBindTexture(GL_TEXTURE_2D, wall_normal_buffer);
+
+	glBindVertexArray(vao2);
+	glBindBuffer(GL_ARRAY_BUFFER, buffer);
+	glEnableVertexAttribArray(0);
+	glVertexAttribPointer(0, 4, GL_FLOAT, GL_FALSE, 0, 0);
+
+	glBindBuffer(GL_ARRAY_BUFFER, normal_buffer);
+	glEnableVertexAttribArray(1);
+	glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 0, 0);
+
+	glBindBuffer(GL_ARRAY_BUFFER, tc_buffer);
+	glEnableVertexAttribArray(2);
+	glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 0, 0);
+
+	//Draw walls
+	glUniform4f(glGetUniformLocation(walls_program, "light_pos"), light_pos[0], light_pos[1], light_pos[2], 1.0f);
+	glUniform1f(glGetUniformLocation(walls_program, "reflecting"), 1.0f);
+	glUniform1f(glGetUniformLocation(walls_program, "time"), currentTime);
+
+	glBindBufferBase(GL_UNIFORM_BUFFER, 0, uniforms_buffer);
+	block = (uniforms_block *)glMapBufferRange(GL_UNIFORM_BUFFER, 0, sizeof(uniforms_block), GL_MAP_WRITE_BIT);
+
+	model_matrix =
+		vmath::scale(1.0f);
+
+	block->mv_matrix = view_matrix * model_matrix;
+	block->view_matrix = view_matrix;
+	block->proj_matrix = perspective_matrix;
+
+	//change_settings(1, 1, 0, 0);
+	glCullFace(GL_FRONT);
+	glDrawArrays(GL_TRIANGLES, 0, vertices.size());
+	glUnmapBuffer(GL_UNIFORM_BUFFER);
+	//End Walls
 #pragma endregion
 
 #pragma region Grass rendering
@@ -458,12 +711,12 @@ void maze_render_app::render(double currentTime)
 	glEnable(GL_BLEND);
 	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
-	glUniform1i(glGetUniformLocation(grass_program, "grass"), 0);
-	glActiveTexture(GL_TEXTURE0 + 0); // Texture unit 2
+	glUniform1i(glGetUniformLocation(grass_program, "grass"), 2);
+	glActiveTexture(GL_TEXTURE0 + 2); // Texture unit 2
 	glBindTexture(GL_TEXTURE_2D, grass_tex);
 
-	light_loc = glGetUniformLocation(grass_program, "light_pos");
-	glUniform4f(light_loc, cXpos, lightY, cZpos, 1.0f);
+	glUniform4f(glGetUniformLocation(grass_program, "light_pos"), light_pos[0], light_pos[1], light_pos[2], 1.0f);
+	glUniform1f(glGetUniformLocation(grass_program, "reflecting"), 1.0f);
 
 	glBindVertexArray(grass_vao);
 	glBindBuffer(GL_ARRAY_BUFFER, grass_buffer);
@@ -473,102 +726,48 @@ void maze_render_app::render(double currentTime)
 	glBindBufferBase(GL_UNIFORM_BUFFER, 0, uniforms_buffer);
 	block = (uniforms_block *)glMapBufferRange(GL_UNIFORM_BUFFER, 0, sizeof(uniforms_block), GL_MAP_WRITE_BIT);
 
-	//model_matrix =
-	//	vmath::scale(1.0f);
-
-	block->mv_matrix = view_matrix;// * model_matrix;
-	block->view_matrix = view_matrix;
-	block->proj_matrix = perspective_matrix;
-
-	glDrawArrays(GL_TRIANGLES, 0, grass_points.size());
-	glDisable(GL_BLEND);
-	glEnable(GL_DEPTH_TEST);
-	glUnmapBuffer(GL_UNIFORM_BUFFER);
-#pragma endregion
-	////Start Cube
-	//glUniform1i(invert_loc, -1); //invert the normals so cube gets proper lighting
-	//
-	//glBindBufferBase(GL_UNIFORM_BUFFER, 0, uniforms_buffer);
-	//block = (uniforms_block *)glMapBufferRange(GL_UNIFORM_BUFFER, 0, sizeof(uniforms_block), GL_MAP_WRITE_BIT);
-	//
-	//model_matrix =
-	//	vmath::translate(vmath::vec3(-6.0f, -16.0f, -6.0f)) *
-	//	vmath::rotate(45.0f, vmath::vec3(0.0f, 1.0f, 0.0f)) *
-	//	vmath::scale(fScale);
-	//
-	//block->mv_matrix = view_matrix * model_matrix;
-	//block->view_matrix = view_matrix;
-	//block->proj_matrix = perspective_matrix;
-	//block->ball_color = vmath::vec4(0.1f, 0.1f, 1.0f, 1.0f);
-	//
-	////change_settings(0, 0, use_pos_color, 0);
-	//
-	//glCullFace(GL_BACK);
-	//glDrawArrays(GL_TRIANGLES, 0, 36);
-	//glUnmapBuffer(GL_UNIFORM_BUFFER);
-	//
-	////End cube
-	//
-	//Floor
-	/*glUseProgram(floor_program);
-	glBindVertexArray(floor_vao);
-	//
-	GLint floor_bump_location = glGetUniformLocation(floor_program, "bump_map");
-	glUniform1i(floor_bump_location, 2);
-	glActiveTexture(GL_TEXTURE0 + 2);
-	glBindTexture(GL_TEXTURE_2D, floor_normal_buffer);
-	//
-	//
-	glBindBuffer(GL_ARRAY_BUFFER, floor_buffer);
-	glEnableVertexAttribArray(0);
-	glVertexAttribPointer(0, 4, GL_FLOAT, GL_FALSE, 0, 0);
-	//
-	glBindBufferBase(GL_UNIFORM_BUFFER, 0, uniforms_buffer);
-	block = (uniforms_block *)glMapBufferRange(GL_UNIFORM_BUFFER, 0, sizeof(uniforms_block), GL_MAP_WRITE_BIT);
-	//
 	model_matrix =
-		vmath::translate(0.0f, -roomScale + 0.01f, 0.0f) *
-		vmath::scale(roomScale);
+		vmath::scale(1.0f);
 
 	block->mv_matrix = view_matrix * model_matrix;
 	block->view_matrix = view_matrix;
 	block->proj_matrix = perspective_matrix;
-	block->ball_color = vmath::vec4(0.3f, 0.3f, 0.3f, 1.0f);
 
-	//change_settings(1, 1, 0, 0);
-	glDrawArrays(GL_TRIANGLES, 0, 36);
+	glCullFace(GL_FRONT);
+	glDrawArrays(GL_TRIANGLES, 0, grass_points.size());
+	glDisable(GL_BLEND);
+	//glEnable(GL_DEPTH_TEST);
 	glUnmapBuffer(GL_UNIFORM_BUFFER);
-	*/
-	//End Floor
-	//
-	//Sphere
-	//if (fragment_program) {
-	//	glUseProgram(color_fragment_cube_program);
-	//}
-	//else {
-	//	glUseProgram(toonshading_program);
-	//}
-	//
-	//glBindVertexArray(object.get_vao());
-	//
-	//glBindBufferBase(GL_UNIFORM_BUFFER, 0, uniforms_buffer);
-	//block = (uniforms_block *)glMapBufferRange(GL_UNIFORM_BUFFER, 0, sizeof(uniforms_block), GL_MAP_WRITE_BIT);
-	//
-	//model_matrix =
-	//	vmath::translate(vmath::vec3(-6.0f, -4.0f, -6.0f)) *
-	//	vmath::scale(fScale * 2);
-	//
-	//block->mv_matrix = view_matrix * model_matrix;
-	//block->view_matrix = view_matrix;
-	//block->proj_matrix = perspective_matrix;
-	//block->ball_color = vmath::vec4(1.0f, 0.1f, 0.5f, 1.0f);
-	//
-	////change_settings(1, 1, use_pos_color, 1);
-	//
-	//glCullFace(GL_BACK);
-	//object.render(); //render call for sphere
-	//glUnmapBuffer(GL_UNIFORM_BUFFER);
-	//End Sphere
+#pragma endregion
+
+#pragma region Render trophy sprite
+	glUseProgram(sprite_program);
+	
+	glUniform1i(glGetUniformLocation(sprite_program, "tex"), 4);
+	glActiveTexture(GL_TEXTURE0 + 4); // Texture unit 4
+	glBindTexture(GL_TEXTURE_2D, trophy_tex);
+
+	glUniform3f(glGetUniformLocation(sprite_program, "pos"), endXpos, 0.0f, endZpos);
+	glUniform1f(glGetUniformLocation(sprite_program, "scalar"), trophy_scale);
+	glUniform1f(glGetUniformLocation(sprite_program, "reflecting"), 1.0f);
+
+	glBindBufferBase(GL_UNIFORM_BUFFER, 0, uniforms_buffer);
+	block = (uniforms_block *)glMapBufferRange(GL_UNIFORM_BUFFER, 0, sizeof(uniforms_block), GL_MAP_WRITE_BIT);
+
+	model_matrix =
+		vmath::scale(1.0f);
+
+	block->mv_matrix = view_matrix * model_matrix;
+	block->view_matrix = view_matrix;
+	block->proj_matrix = perspective_matrix;
+
+	glCullFace(GL_FRONT);
+	glEnable(GL_BLEND);
+	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+	glDrawArrays(GL_TRIANGLES, 0, 6);
+	glDisable(GL_BLEND);
+	glUnmapBuffer(GL_UNIFORM_BUFFER);
+#pragma endregion
 
 }
 
@@ -733,7 +932,7 @@ void maze_render_app::load_image(std::string filename, GLuint * tex_buf) {
 	glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST_MIPMAP_NEAREST);
 	glGenTextures(1, tex_buf);
 	glBindTexture(GL_TEXTURE_2D, *tex_buf);
-	glTexStorage2D(GL_TEXTURE_2D, 1, GL_RGB8, iwidth, iheight);
+	glTexStorage2D(GL_TEXTURE_2D, 1, GL_RGBA8, iwidth, iheight);
 	
 
 	//genCheckerboard(checkers); //generates a checkerboard with X checkers
@@ -761,7 +960,7 @@ inline std::istream& operator>>(std::istream& is, chlit x)
 	return is;
 }
 
-int ** maze_render_app::load_level(std::string filename, int & width, int & height) {
+int ** maze_render_app::load_level(std::string filename, int & width, int & height, int &startr, int &startc, int &endr, int &endc) {
 	std::ifstream file(filename);
 	int ** level;
 	if (file.is_open())
@@ -775,6 +974,10 @@ int ** maze_render_app::load_level(std::string filename, int & width, int & heig
 				level[i][j] = 0;
 			}
 		}
+
+		file >> startr >> startc >> endr >> endc;
+		level[startr][startc] = 2; //start point is 2
+		level[endr][endc] = 3; //end point is 3
 
 		while (file >> r >> c) {
 			level[c][r] = 1;
@@ -896,7 +1099,7 @@ int maze_render_app::convert_to_coord(float pos, int dim) {
 void maze_render_app::wall_collision(float & xPos, float & zPos, vmath::vec3 direction, int height, int width, int** level) {
 	vmath::vec3 cr = vmath::cross(direction, vmath::vec3(0.0, 1.0, 0.0));
 	vmath::vec3 curr = vmath::vec3(xPos, 0.0f, zPos);
-	float scalar = 0.33f;
+	float scalar = 0.30f;
 	std::vector< vmath::vec3 > dirs;
 	dirs.push_back(curr + (direction*scalar));
 	dirs.push_back(curr - (direction*scalar));
@@ -932,11 +1135,10 @@ void maze_render_app::wall_collision(float & xPos, float & zPos, vmath::vec3 dir
 				break;
 			}
 		}
+		else if (level[row][col] == 3) {
+			//you win
+		}
 	}
-
-	//for now, this block constitutes one collision check (center position)
-	// i want to check if +0.1 in front, back, left, and right of player are also not colliding
-	
 }
 
 DECLARE_MAIN(maze_render_app)

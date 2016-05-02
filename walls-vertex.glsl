@@ -12,6 +12,8 @@ layout(std140) uniform constants
 };
 
 uniform vec4 light_pos;
+uniform float time;
+uniform float reflecting;
 
 // Outputs to Fragment Shader
 out VS_OUT
@@ -22,9 +24,10 @@ out VS_OUT
 	vec2 tc;
 	float light_dist;
 	float attenuation;
+	float reflecting;
 } vs_out;
 
-uniform float constant_att  = 0.05; 
+uniform float constant_att  = 0.04; 
 uniform float linear_att    = 0.10; 
 uniform float quadratic_att = 0.015;
 
@@ -32,7 +35,8 @@ void main(void)
 {
 	vs_out.mv_matrix = mv_matrix;
 
-    vec4 P = mv_matrix * position;
+    vec4 P = mv_matrix * position;// + vec4((normal * abs((sin(time)/10.0))), 1.0));
+
     vec3 L = (mv_matrix*light_pos).xyz - P.xyz;
 
 	float d = distance(P.xyz, L);
@@ -41,7 +45,15 @@ void main(void)
 	vs_out.attenuation = 1.0 / ( constant_att +	(linear_att*d) + (quadratic_att*d*d));
 	vs_out.L = L;
     vs_out.V = -P.xyz;
-	vs_out.tc = tex_coord;
+
+	if (reflecting < 0) {
+		vs_out.tc = vec2(tex_coord.x, tex_coord.y);// * reflecting);
+	}
+	else {
+		vs_out.tc = tex_coord;
+	}
+
+	vs_out.reflecting = reflecting;
 
     gl_Position = proj_matrix * P;
 }

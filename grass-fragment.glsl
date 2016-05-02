@@ -1,6 +1,7 @@
 #version 410 core
 
 uniform sampler2D grass;
+uniform vec4 icolor;
 
 in VS_OUT {	
 	vec3 L;	
@@ -22,7 +23,7 @@ uniform vec3 ambient = vec3(0.03, 0.03, 0.03);
 void main(void)
 {
 	vec4 tcolor = texture(grass, fs_in.tc);
-	if (tcolor.r == 0.0 && tcolor.g == 0.0 && tcolor.b == 0.0) { discard; }
+	if (tcolor.a == 0.0) { discard; }
 
 	// Normalize the incoming N, L and V vectors
     vec3 N = normalize(fs_in.N);

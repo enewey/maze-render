@@ -10,6 +10,7 @@ layout(std140) uniform constants
 };
 
 uniform vec4 light_pos;
+uniform float reflecting;
 
 out VS_OUT {
 	vec3 L;
@@ -20,7 +21,7 @@ out VS_OUT {
 	float attenuation;
 } vs_out;
 
-uniform float constant_att  = 0.05; 
+uniform float constant_att  = 0.04; 
 uniform float linear_att    = 0.10; 
 uniform float quadratic_att = 0.015;
 
@@ -55,9 +56,16 @@ void main(void) {
 	int modu = gl_VertexID % 6;
 	P.xy = P.xy + (quad[modu] * scalar) - vec2(0.0, 1.0-scalar); //add scaled vertex to form triangle
 
-	vs_out.V = -P.xyz;
+	vec3 vout = -P.xyz;
+	vec2 tcout = vec2(tcquad[modu].x + tc_u, tcquad[modu].y);
+	if (reflecting < 0) {
+		vout.y = -vout.y;
+		tcout.y = -tcout.y;
+	}
+	
+	vs_out.V = vout;
+	vs_out.tc = tcout;
 	vs_out.L = L;
 	vs_out.N = vec3(0.0, 0.0, 1.0);
-	vs_out.tc = vec2(tcquad[modu].x + tc_u, tcquad[modu].y);
 	gl_Position = proj_matrix * P; //finally put into proper space
 }

@@ -268,23 +268,17 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="lodepng.cpp" />
-    <ClCompile Include="Nobject.cpp" />
     <ClCompile Include="src\GettingStarted\maze_render.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <None Include="bin\media\objects\sphere.sbm" />
     <None Include="grass-fragment.glsl" />
     <None Include="grass-vertex.glsl" />
-    <None Include="pv-fragment-shader.glsl" />
-    <None Include="pf-fragment-shader.glsl" />
-    <None Include="pf-vertex-shader.glsl" />
   </ItemGroup>
   <ItemGroup>
-    <Text Include="pv-vertex-shader.glsl" />
     <Text Include="floor-vertex.glsl" />
     <Text Include="floor-fragment.glsl" />
-    <Text Include="toon-fragment.glsl" />
-    <Text Include="toon-vertex.glsl" />
+    <Text Include="sprite-vertex.glsl" />
+    <Text Include="sprite-fragment.glsl" />
     <Text Include="walls-vertex.glsl" />
     <Text Include="walls-fragment.glsl" />
   </ItemGroup>

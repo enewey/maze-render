@@ -1,42 +1,28 @@
 #version 410 core
 
-uniform sampler2D bump_map;
+uniform sampler2D floor_tex;
+uniform vec2 window_size;
+uniform float curr_time;
 
 // Output
 out vec4 color;
 
-in VS_OUT
-{
-	mat4 mv_matrix;
-	//vec3 N;
-    vec3 L;
-    vec3 V;
-    vec2 tc;
-} fs_in;
+in vec4 pos;
 
-// Material properties
-uniform vec3 diffuse_albedo = vec3(0.7, 0.5, 0.3);
-uniform vec3 ambient = vec3(0.1, 0.1, 0.1);
+uniform float freq = 60.0;
+uniform float amp = 0.005;
+uniform float wave_speed = 0.05;
 
 void main(void)
 {
-	
-	vec3 bumpN = (fs_in.mv_matrix * texture(bump_map, fs_in.tc)).xyz;
-	bumpN = bumpN.xzy;
-	bumpN.y = -bumpN.y;
+	vec2 tc = vec2(gl_FragCoord.x / window_size.x, gl_FragCoord.y / window_size.y);
 
-	// Normalize the incoming N, L and V vectors
-    vec3 N = normalize((bumpN-0.5)*2.0);
-    vec3 L = normalize(fs_in.L);
-    vec3 V = normalize(fs_in.V);
+	float wave = wave_speed * curr_time;
+	float displacement = (sin((tc.y + wave) * freq) * amp);
 
-	// Calculate R locally
-    vec3 R = reflect(-L, N);
+	tc.x = tc.x + displacement;
+	vec4 tex_color = texture(floor_tex, tc);
 
-    // Compute the diffuse and specular components for each fragment
-    vec3 diffuse = max(dot(N, L), 0.0) * diffuse_albedo;
 
-    // Write final color to the framebuffer
-    color = vec4((ambient + diffuse), 1.0); //* texture(bump_map, fs_in.tc);
-
+	color = vec4( ((tex_color * vec4(0.9, 0.9, 1.0, 1.0) + vec4(0.1, 0.1, 0.25, 1.0)) / 1.5).xyz, 1.0);
 }
