@@ -70,21 +70,9 @@ protected:
 	};
 	GLuint          uniforms_buffer;
 
-	//int iWidth = info.windowWidth;
-	//int iHeight = info.windowHeight;
-
-	//Sphere generation members
-	/*int stacks = 10;
-	int slices = 12;
-	float radius = 1.0f;
-	GLint sphere_triangles;
-	GLfloat* sphere_data;*/
-
 	// Rotation and Translation matricies for moving the camera by mouse interaction.
 	vmath::mat4 rotationMatrix = vmath::mat4::identity();
 	vmath::mat4 translationMatrix = vmath::mat4::identity();
-
-	//vmath::mat4 directionMatrix = vmath::mat4::identity();
 
 private:
 
@@ -153,6 +141,16 @@ private:
 	//Scale of the trophy sprite
 	float trophy_scale = 0.5f;
 };
+
+void load_vertex(GLuint &buf, GLsizeiptr size, const void * points) {
+	glGenBuffers(1, &buf);
+	glBindBuffer(GL_ARRAY_BUFFER, buf);
+	glBufferData(GL_ARRAY_BUFFER,
+		size,
+		points,
+		GL_STATIC_DRAW);
+	glBindBuffer(GL_ARRAY_BUFFER, 0);
+}
 
 void maze_render_app::startup()
 {
@@ -235,32 +233,9 @@ void maze_render_app::startup()
 	glGenVertexArrays(1, &vao2);
 	glBindVertexArray(vao2);
 
-	//Texture coords buffer
-	glGenBuffers(1, &tc_buffer);
-	glBindBuffer(GL_ARRAY_BUFFER, tc_buffer);
-	glBufferData(GL_ARRAY_BUFFER,
-		uvs.size() * sizeof(vmath::vec2),
-		&uvs[0],
-		GL_STATIC_DRAW);
-	glBindBuffer(GL_ARRAY_BUFFER, 0);
-
-	//Cube buffer
-	glGenBuffers(1, &buffer);
-	glBindBuffer(GL_ARRAY_BUFFER, buffer);
-	glBufferData(GL_ARRAY_BUFFER,
-		vertices.size() * sizeof(vmath::vec4),
-		&vertices[0],
-		GL_STATIC_DRAW);
-	glBindBuffer(GL_ARRAY_BUFFER, 0);
-
-	//Normals for cube buffer
-	glGenBuffers(1, &normal_buffer);
-	glBindBuffer(GL_ARRAY_BUFFER, normal_buffer);
-	glBufferData(GL_ARRAY_BUFFER,
-		normals.size() * sizeof(vmath::vec3),
-		&normals[0],
-		GL_STATIC_DRAW);
-	glBindBuffer(GL_ARRAY_BUFFER, 0);
+	load_vertex(buffer, vertices.size() * sizeof(vmath::vec4), &vertices[0]);
+	load_vertex(normal_buffer, normals.size() * sizeof(vmath::vec3), &normals[0]);
+	load_vertex(tc_buffer, uvs.size() * sizeof(vmath::vec2), &uvs[0]);
 	
 #pragma endregion
 
@@ -269,45 +244,16 @@ void maze_render_app::startup()
 	glGenVertexArrays(1, &floor_vao);
 	glBindVertexArray(floor_vao);
 
-	//Texture coords buffer
-	glGenBuffers(1, &ftc_buffer);
-	glBindBuffer(GL_ARRAY_BUFFER, ftc_buffer);
-	glBufferData(GL_ARRAY_BUFFER,
-		fuvs.size() * sizeof(vmath::vec2),
-		&fuvs[0],
-		GL_STATIC_DRAW);
-	glBindBuffer(GL_ARRAY_BUFFER, 0);
-
-	//Vertex buffer
-	glGenBuffers(1, &fbuffer);
-	glBindBuffer(GL_ARRAY_BUFFER, fbuffer);
-	glBufferData(GL_ARRAY_BUFFER,
-		fvertices.size() * sizeof(vmath::vec4),
-		&fvertices[0],
-		GL_STATIC_DRAW);
-	glBindBuffer(GL_ARRAY_BUFFER, 0);
-
-	//Normals buffer
-	glGenBuffers(1, &fnormal_buffer);
-	glBindBuffer(GL_ARRAY_BUFFER, fnormal_buffer);
-	glBufferData(GL_ARRAY_BUFFER,
-		fnormals.size() * sizeof(vmath::vec3),
-		&fnormals[0],
-		GL_STATIC_DRAW);
-	glBindBuffer(GL_ARRAY_BUFFER, 0);
+	load_vertex(fbuffer, fvertices.size() * sizeof(vmath::vec4), &fvertices[0]);
+	load_vertex(fnormal_buffer, fnormals.size() * sizeof(vmath::vec3), &fnormals[0]);
+	load_vertex(ftc_buffer, fuvs.size() * sizeof(vmath::vec2), &fuvs[0]);
 #pragma endregion
 
 #pragma region Grass buffers
 	glGenVertexArrays(1, &grass_vao);
 	glBindVertexArray(grass_vao);
 
-	glGenBuffers(1, &grass_buffer);
-	glBindBuffer(GL_ARRAY_BUFFER, grass_buffer);
-	glBufferData(GL_ARRAY_BUFFER,
-		grass_points.size() * sizeof(vmath::vec3),
-		&grass_points[0],
-		GL_STATIC_DRAW);
-	glBindBuffer(GL_ARRAY_BUFFER, 0);
+	load_vertex(grass_buffer, grass_points.size() * sizeof(vmath::vec3), &grass_points[0]);
 #pragma endregion
 
 	// Buffer for uniform block
@@ -750,7 +696,6 @@ vmath::vec3 maze_render_app::getArcballVector(int x, int y) {
 //Method to load png images from disk to texture
 void maze_render_app::load_image(std::string filename, GLuint * tex_buf) {
 	std::vector<unsigned char> image;
-	//std::string filename = "bin\\media\\textures\\wall.png";
 	unsigned iwidth, iheight;
 	unsigned err = lodepng::decode(image, iwidth, iheight, filename);
 	if (err != 0) {
@@ -774,14 +719,12 @@ void maze_render_app::load_image(std::string filename, GLuint * tex_buf) {
 	glBindTexture(GL_TEXTURE_2D, *tex_buf);
 	glTexStorage2D(GL_TEXTURE_2D, 1, GL_RGBA8, iwidth, iheight);
 	
-
-	//genCheckerboard(checkers); //generates a checkerboard with X checkers
 	glTexSubImage2D(GL_TEXTURE_2D,  // 2D texture
-		0,              // Level 0
-		0, 0,           // Offset 0, 0
-		iwidth, iheight,       // 256 x 256 texels, replace entire image
-		GL_RGBA,        // Four channel data
-		GL_UNSIGNED_BYTE,       // data type
+		0,					// Level 0
+		0, 0,				// Offset 0, 0
+		iwidth, iheight,    // 256 x 256 texels, replace entire image
+		GL_RGBA,			// Four channel data
+		GL_UNSIGNED_BYTE,   // data type
 		&tex[0]);
 }
 
