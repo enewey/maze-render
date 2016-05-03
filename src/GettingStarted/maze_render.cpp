@@ -1,7 +1,5 @@
 #include <sb7.h>
 #include <vmath.h>
-#include <object.h>
-#include <sb7ktx.h>
 #include <shader.h>
 #include <assert.h>
 
@@ -54,6 +52,7 @@ protected:
 	int convert_to_coord(float pos, int dim);
 
 	void wall_collision(float & xPos, float & zPos, vmath::vec3 direction, int height, int width, int** level);
+	bool load_shader(GLuint & prog, char* vert, char*frag);
 
 	//Programs
 	GLuint			walls_program;
@@ -71,15 +70,8 @@ protected:
 	};
 	GLuint          uniforms_buffer;
 
-	// Variables for mouse interaction
-	bool bPerVertex;
-	bool bShiftPressed = false;
-	bool bZoom = false;
-	bool bRotate = false;
-	bool bPan = false;
-
-	int iWidth = info.windowWidth;
-	int iHeight = info.windowHeight;
+	//int iWidth = info.windowWidth;
+	//int iHeight = info.windowHeight;
 
 	//Sphere generation members
 	/*int stacks = 10;
@@ -95,40 +87,29 @@ protected:
 	//vmath::mat4 directionMatrix = vmath::mat4::identity();
 
 private:
-	// Variables for mouse position to solve the arcball vectors
-	int iPrevMouseX = 0;
-	int iPrevMouseY = 0;
-	int iCurMouseX = 0;
-	int iCurMouseY = 0;
-
-	// Scale of the objects in the scene
-	float fScale = 4.0f;
-	float roomScale = 20.0f;
-
-	// Initial position of the camera
-	float fXpos = 0.0f;
-	float fYpos = 0.0f;
-	float fZpos = 75.0f;
 
 	bool * dirPress;
 	float lookingAngle = 0.0f;
 	vmath::vec3 direction;
 	vmath::vec3 position;
+
+	//"Character" position
 	float cXpos;
 	float cYpos = 0.0f;
 	float cZpos;
 
+	//Trophy position
 	float endXpos, endZpos;
 
+	//Where the light sits in the y-axis
 	float lightY = 1.0f;
 
+	//Necessary to throttle movement
 	double timeElapsed = 0.0;
 
 	int _width, _height, _startr, _startc, _endr, _endc;
 	int ** _level;
 	
-	GLuint floor_buffer;
-
 	//Vertex array objects
 	GLuint vao2;
 	GLuint grass_vao;
@@ -160,15 +141,17 @@ private:
 	GLuint grass_buffer;
 	std::vector< vmath::vec3 > grass_points;
 
+	//Framebuffer objects
 	GLuint frame_buf;
 	GLuint render_buf;
+
+	int viewport_w = 1920, viewport_h = 1080;
 
 	//Each floor will have n^2 blades of grass
 	int grass_blades = 6;
 
+	//Scale of the trophy sprite
 	float trophy_scale = 0.5f;
-
-	sb7::object object;
 };
 
 void maze_render_app::startup()
@@ -180,54 +163,15 @@ void maze_render_app::startup()
 	direction = vmath::vec3(0.0f, 0.0f, -1.0f);
 
 #pragma region Load shaders
-	// Create program for the spinning cube
-	//color_fragment_cube_program = glCreateProgram();
-	walls_program = glCreateProgram();
-	grass_program = glCreateProgram();
-	floor_program = glCreateProgram();
-	sprite_program = glCreateProgram();
-	GLint success = 0;
+	walls_program = glCreateProgram(); //Bump-mapped walls
+	grass_program = glCreateProgram(); //Grass sprites
+	floor_program = glCreateProgram(); //Water floor
+	sprite_program = glCreateProgram(); //Trophy
 
-	//Load per-fragment phong shaders
-	GLuint pvfs;
-	GLuint pvvs;
-
-	//Load per-vertex phong shaders
-	pvvs = sb7::shader::load("walls-vertex.glsl", GL_VERTEX_SHADER);
-	pvfs = sb7::shader::load("walls-fragment.glsl", GL_FRAGMENT_SHADER);
-	glAttachShader(walls_program, pvvs);
-	glAttachShader(walls_program, pvfs);
-	glLinkProgram(walls_program);
-	success = 0;
-	glGetProgramiv(walls_program, GL_LINK_STATUS, &success);
-	assert(success != GL_FALSE);
-
-	pvvs = sb7::shader::load("floor-vertex.glsl", GL_VERTEX_SHADER);
-	pvfs = sb7::shader::load("floor-fragment.glsl", GL_FRAGMENT_SHADER);
-	glAttachShader(floor_program, pvvs);
-	glAttachShader(floor_program, pvfs);
-	glLinkProgram(floor_program);
-	success = 0;
-	glGetProgramiv(floor_program, GL_LINK_STATUS, &success);
-	assert(success != GL_FALSE);
-
-	pvvs = sb7::shader::load("grass-vertex.glsl", GL_VERTEX_SHADER);
-	pvfs = sb7::shader::load("grass-fragment.glsl", GL_FRAGMENT_SHADER);
-	glAttachShader(grass_program, pvvs);
-	glAttachShader(grass_program, pvfs);
-	glLinkProgram(grass_program);
-	success = 0;
-	glGetProgramiv(grass_program, GL_LINK_STATUS, &success);
-	assert(success != GL_FALSE);
-
-	pvvs = sb7::shader::load("sprite-vertex.glsl", GL_VERTEX_SHADER);
-	pvfs = sb7::shader::load("sprite-fragment.glsl", GL_FRAGMENT_SHADER);
-	glAttachShader(sprite_program, pvvs);
-	glAttachShader(sprite_program, pvfs);
-	glLinkProgram(sprite_program);
-	success = 0;
-	glGetProgramiv(sprite_program, GL_LINK_STATUS, &success);
-	assert(success != GL_FALSE);
+	assert(load_shader(walls_program, "walls-vertex.glsl", "walls-fragment.glsl"));
+	assert(load_shader(floor_program, "floor-vertex.glsl", "floor-fragment.glsl"));
+	assert(load_shader(grass_program, "grass-vertex.glsl", "grass-fragment.glsl"));
+	assert(load_shader(sprite_program, "sprite-vertex.glsl", "sprite-fragment.glsl"));
 #pragma endregion
 
 #pragma region Create Framebuffer Object
@@ -236,7 +180,7 @@ void maze_render_app::startup()
 
 	glGenTextures(1, &frame_tex);
 	glBindTexture(GL_TEXTURE_2D, frame_tex);
-	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, 1920, 1080, 0, GL_RGB, GL_UNSIGNED_BYTE, NULL);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, viewport_w, viewport_h, 0, GL_RGB, GL_UNSIGNED_BYTE, NULL);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 	glBindTexture(GL_TEXTURE_2D, 0);
@@ -245,7 +189,7 @@ void maze_render_app::startup()
 
 	glGenRenderbuffers(1, &render_buf);
 	glBindRenderbuffer(GL_RENDERBUFFER, render_buf);
-	glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, 1920, 1080);
+	glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, viewport_w, viewport_h);
 	glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, render_buf);
 
 	assert(glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE); //make sure FBO is created
@@ -257,13 +201,13 @@ void maze_render_app::startup()
 	//Load textures
 	load_image("bin\\media\\textures\\wall.png", &wall_tex_buffer);
 	load_image("bin\\media\\textures\\normal.png", &wall_normal_buffer);
-	load_image("bin\\media\\textures\\floor_normal.png", &floor_normal_buffer);	
+	load_image("bin\\media\\textures\\floor_normal.png", &floor_normal_buffer);
 	load_image("bin\\media\\textures\\grass_tex.png", &grass_tex);
 	load_image("bin\\media\\textures\\trophy.png", &trophy_tex);
 #pragma endregion
 
 #pragma region Load Object data
-	//Object data loaded from file
+	//Object data loaded from files
 	bool res = load_object("bin\\media\\objects\\wall_data.obj", vertices, uvs, normals);
 	assert(res);
 	res = load_object("bin\\media\\objects\\floor_data.obj", fvertices, fuvs, fnormals);
@@ -273,12 +217,15 @@ void maze_render_app::startup()
 #pragma region Load and initialize level data
 	_level = load_level("bin\\media\\objects\\walls.mdf", _width, _height, _startr, _startc, _endr, _endc);
 
+	//Set the starting position
 	cXpos = convert_to_vert(_startc, _width) - 1.0f;
 	cZpos = convert_to_vert(_startr, _height) - 1.0f;
 
+	//Set the end position (the trophy)
 	endXpos = convert_to_vert(_endc, _width) - 1.0f;
 	endZpos = convert_to_vert(_endr, _height) - 1.0f;
 
+	//Generate the points for grass sprites
 	generate_grass(_level, _width, _height, grass_points);
 #pragma endregion
 	
@@ -375,7 +322,6 @@ void maze_render_app::startup()
 }
 
 
-
 void maze_render_app::render(double currentTime)
 {
 	static const GLfloat zeros[] = { 0.0f, 0.0f, 0.0f, 0.0f };
@@ -442,61 +388,10 @@ void maze_render_app::render(double currentTime)
 
 	glBindFramebuffer(GL_FRAMEBUFFER, frame_buf);
 
-	glViewport(0, 0, 1920, 1080);
+	glViewport(0, 0, viewport_w, viewport_h);
 	glClearColor(0.1f, 0.1f, 0.2f, 1.0f);
 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 	glEnable(GL_DEPTH_TEST);
-
-	/*
-	//First, take a stencil of the floor being drawn
-	glEnable(GL_STENCIL_TEST);
-	glStencilFunc(GL_ALWAYS, 1, 0xFF);
-	glStencilOp(GL_KEEP, GL_KEEP, GL_REPLACE);
-	glStencilMask(0xFF);
-	glDepthMask(GL_FALSE);
-	glClear(GL_STENCIL_BUFFER_BIT);
-
-#pragma region Floor Rendering
-	//Begin Floor
-	
-	glUseProgram(floor_program);
-
-	glBindVertexArray(floor_vao);
-	glBindBuffer(GL_ARRAY_BUFFER, fbuffer);
-	glEnableVertexAttribArray(0);
-	glVertexAttribPointer(0, 4, GL_FLOAT, GL_FALSE, 0, 0);
-
-	glBindBuffer(GL_ARRAY_BUFFER, fnormal_buffer);
-	glEnableVertexAttribArray(1);
-	glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 0, 0);
-
-	glBindBuffer(GL_ARRAY_BUFFER, ftc_buffer);
-	glEnableVertexAttribArray(2);
-	glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 0, 0);
-
-	glBindBufferBase(GL_UNIFORM_BUFFER, 0, uniforms_buffer);
-	block = (uniforms_block *)glMapBufferRange(GL_UNIFORM_BUFFER, 0, sizeof(uniforms_block), GL_MAP_WRITE_BIT | GL_MAP_INVALIDATE_BUFFER_BIT);
-
-	//model_matrix =
-	//	vmath::scale(1.0f);
-
-	block->mv_matrix = view_matrix;// *model_matrix;
-	block->view_matrix = view_matrix;
-	block->proj_matrix = perspective_matrix;
-
-	//change_settings(1, 1, 0, 0);
-	glCullFace(GL_FRONT);
-	glDepthMask(GL_FALSE);
-	glDrawArrays(GL_TRIANGLES, 0, fvertices.size());
-	glUnmapBuffer(GL_UNIFORM_BUFFER);
-	glDepthMask(GL_TRUE);
-#pragma endregion
-
-	//Now draw the "reflection" using the stencil we just filled previously
-	glStencilFunc(GL_EQUAL, 1, 0xFF);
-	glStencilMask(0x00);
-	glDepthMask(GL_TRUE);
-	*/
 
 #pragma region Wall Reflection Rendering
 	glUseProgram(walls_program);
@@ -525,7 +420,7 @@ void maze_render_app::render(double currentTime)
 	glUniform1f(glGetUniformLocation(walls_program, "time"), currentTime);
 
 	glBindBufferBase(GL_UNIFORM_BUFFER, 0, uniforms_buffer);
-	block = (uniforms_block *)glMapBufferRange(GL_UNIFORM_BUFFER, 0, sizeof(uniforms_block), GL_MAP_WRITE_BIT);
+	block = (uniforms_block *)glMapBufferRange(GL_UNIFORM_BUFFER, 0, sizeof(uniforms_block), GL_MAP_WRITE_BIT | GL_MAP_INVALIDATE_BUFFER_BIT);
 
 	model_matrix =
 		vmath::translate(0.0f, -2.0f, 0.0f) *
@@ -606,10 +501,6 @@ void maze_render_app::render(double currentTime)
 	glDisable(GL_BLEND);
 	glUnmapBuffer(GL_UNIFORM_BUFFER);
 #pragma endregion
-
-
-	//Stop stenciling
-	//glDisable(GL_STENCIL_TEST);
 
 	glBindFramebuffer(GL_FRAMEBUFFER, 0);
 	glViewport(0, 0, info.windowWidth, info.windowHeight);
@@ -773,8 +664,8 @@ void maze_render_app::render(double currentTime)
 
 void maze_render_app::onKey(int key, int action)
 {
-	// Check to see if shift was pressed
-	if (action == GLFW_PRESS/* && (key == GLFW_KEY_LEFT_SHIFT || key == GLFW_KEY_RIGHT_SHIFT)*/)
+	// Check to see if key was pressed
+	if (action == GLFW_PRESS)
 	{
 		switch (key) {
 			case 'W':
@@ -801,26 +692,7 @@ void maze_render_app::onKey(int key, int action)
 
 		//bShiftPressed = true;
 	}
-	if (action)
-	{
-		switch (key)
-		{
-		//case 'R': //reset camera to original position
-		//	rotationMatrix = vmath::mat4::identity();
-		//	translationMatrix = vmath::mat4::identity();
-		//	fXpos = 0.0f;
-		//	fYpos = 0.0f;
-		//	fZpos = 75.0f;
-		//	break;
-
-		//case 'V': //switch between phong and toonshading
-		//	fragment_program = !fragment_program;
-		//	break;
-		//default:
-		//	break;
-		}
-	}
-	// Check to see if shift was released
+	// Check to see if key was released
 	if (action == GLFW_RELEASE) {
 		switch (key) {
 		case 'W':
@@ -850,44 +722,12 @@ void maze_render_app::onKey(int key, int action)
 
 void maze_render_app::onMouseButton(int button, int action)
 {
-	int x, y;
-
-	//getMousePosition(x, y);
-	//// Check to see if left mouse button was pressed for rotation
-	//if (button == GLFW_MOUSE_BUTTON_LEFT && action == GLFW_PRESS) {
-	//	bRotate = true;
-	//	iPrevMouseX = iCurMouseX = x;
-	//	iPrevMouseY = iCurMouseY = y;
-	//}
-	//// Check to see if right mouse button was pressed for zoom and pan
-	//else if (button == GLFW_MOUSE_BUTTON_RIGHT && action == GLFW_PRESS) {
-	//	bZoom = false;
-	//	bPan = false;
-	//	if (bShiftPressed == true) {
-	//		bZoom = true;
-	//	}
-	//	else if (bShiftPressed == false) {
-	//		bPan = true;
-	//	}
-	//	iPrevMouseX = iCurMouseX = x;
-	//	iPrevMouseY = iCurMouseY = y;
-	//}
-	//else {
-	//	bRotate = false;
-	//	bZoom = false;
-	//	bPan = false;
-	//}
 
 }
 
 void maze_render_app::onMouseMove(int x, int y)
 {
-	// If rotating, zooming, or panning save mouse x and y
-	if (bRotate || bZoom || bPan)
-	{
-		iCurMouseX = x;
-		iCurMouseY = y;
-	}
+
 }
 
 // Modified from tutorial at the following website:
@@ -945,6 +785,23 @@ void maze_render_app::load_image(std::string filename, GLuint * tex_buf) {
 		&tex[0]);
 }
 
+bool maze_render_app::load_shader(GLuint & prog, char* vert_file, char* frag_file) {
+	GLuint vert_shader = sb7::shader::load(vert_file, GL_VERTEX_SHADER);
+	GLuint frag_shader = sb7::shader::load(frag_file, GL_FRAGMENT_SHADER);
+	glAttachShader(prog, vert_shader);
+	glAttachShader(prog, frag_shader);
+	glLinkProgram(prog);
+
+	glDetachShader(prog, vert_shader);
+	glDetachShader(prog, frag_shader);
+	glDeleteShader(vert_shader);
+	glDeleteShader(frag_shader);
+
+	GLint success = 0;
+	glGetProgramiv(prog, GL_LINK_STATUS, &success);
+	return (success != GL_FALSE);
+}
+
 //http://stackoverflow.com/questions/4711238/using-ifstream-as-fscanf
 struct chlit
 {
@@ -987,6 +844,7 @@ int ** maze_render_app::load_level(std::string filename, int & width, int & heig
 	return level;
 }
 
+//Load vertex data from an .obj file. Only supports v, vt, vn, and f params.
 bool maze_render_app::load_object(std::string filename, std::vector<vmath::vec4> & out_vertices,
 														std::vector < vmath::vec2 > & out_uvs,
 														std::vector < vmath::vec3 > & out_normals) {
@@ -1088,14 +946,10 @@ float maze_render_app::convert_to_vert(int coord, int dim) {
 }
 
 int maze_render_app::convert_to_coord(float pos, int dim) {
-	/*int flor = floor(pos);
-	int ceil = floor(pos+1.0f);
-	if (flor % 2 == 0) pos = flor;
-	else if (ceil % 2 == 0) pos = ceil;*/
-
 	return (floor(pos + 1.0f) + dim) / 2;
 }
 
+//This is awful
 void maze_render_app::wall_collision(float & xPos, float & zPos, vmath::vec3 direction, int height, int width, int** level) {
 	vmath::vec3 cr = vmath::cross(direction, vmath::vec3(0.0, 1.0, 0.0));
 	vmath::vec3 curr = vmath::vec3(xPos, 0.0f, zPos);

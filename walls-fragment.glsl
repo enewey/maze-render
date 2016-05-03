@@ -9,10 +9,9 @@ out vec4 color;
 in VS_OUT
 {
 	mat4 mv_matrix;
-	vec4 fcolor;
     vec3 L;
     vec3 V;
-    vec2 tc;
+	vec2 tc;
 	float light_dist;
 	float attenuation;
 	float reflecting;
